@@ -33,8 +33,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install browser-like HTTP client
-        run: python -m pip install --disable-pip-version-check curl-cffi==0.13.0
+      - name: Install Playwright
+        run: python -m pip install --disable-pip-version-check playwright==1.54.0
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Check Aosom and notify Discord
         env:
