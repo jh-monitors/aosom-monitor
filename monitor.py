@@ -17,9 +17,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse, urlunparse
-from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
@@ -44,26 +42,64 @@ def save_json(path: Path, value: Any) -> None:
 
 
 def fetch(url: str, attempts: int = 3) -> str:
+    """Render a page in a real headless Chromium browser.
+
+    Aosom blocks direct requests from GitHub-hosted runners. Playwright loads
+    the page through Chromium, executes its normal browser JavaScript, and
+    returns the rendered HTML used by the existing product parser.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "Playwright is not installed. Confirm the workflow contains the "
+            "Install Playwright and Chromium steps."
+        ) from exc
+
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
-        req = Request(
-            url,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-GB,en;q=0.9",
-                "Cache-Control": "no-cache",
-            },
-        )
         try:
-            with urlopen(req, timeout=30) as response:
-                charset = response.headers.get_content_charset() or "utf-8"
-                return response.read().decode(charset, errors="replace")
-        except (HTTPError, URLError, TimeoutError) as exc:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                    ],
+                )
+                context = browser.new_context(
+                    user_agent=USER_AGENT,
+                    locale="en-GB",
+                    timezone_id="Europe/London",
+                    viewport={"width": 1440, "height": 1000},
+                    extra_http_headers={
+                        "Accept-Language": "en-GB,en;q=0.9",
+                        "Referer": "https://www.aosom.co.uk/",
+                    },
+                )
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(5000)
+                status = page.locator("body").count()
+                content = page.content()
+                title = page.title()
+                browser.close()
+
+                if not status or len(content) < 5000:
+                    raise RuntimeError(
+                        f"Aosom returned an incomplete page: title={title!r}, "
+                        f"length={len(content)}"
+                    )
+                if "Access Denied" in title or "Forbidden" in title:
+                    raise RuntimeError(f"Aosom blocked Chromium: title={title!r}")
+                return content
+        except Exception as exc:
             last_error = exc
             if attempt < attempts:
-                time.sleep(attempt * 2)
-    raise RuntimeError(f"Could not download {url}: {last_error}")
+                time.sleep(attempt * 5)
+
+    raise RuntimeError(f"Could not render {url} in Chromium: {last_error}")
 
 
 def normalise_url(url: str) -> str:
@@ -165,6 +201,7 @@ def send_discord(webhook_url: str, content: str) -> None:
 
 
 def main() -> int:
+    print("AOSOM MONITOR VERSION: PLAYWRIGHT-CHROMIUM-V3")
     config = load_json(CONFIG_PATH, {})
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
     test_mode = os.environ.get("TEST_NOTIFICATION", "false").lower() in {"1", "true", "yes", "on"}
