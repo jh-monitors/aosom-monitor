@@ -1,0 +1,54 @@
+name: Aosom Air Conditioner Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: "Send a Discord test notification instead of checking Aosom"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aosom-air-conditioner-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Aosom and notify Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_NOTIFICATION: ${{ inputs.send_test_notification || 'false' }}
+        run: python monitor.py
+
+      - name: Save monitor state when it changed
+        if: ${{ inputs.send_test_notification != true }}
+        run: |
+          if git diff --quiet -- state.json; then
+            echo "No state change to save."
+            exit 0
+          fi
+          git config user.name "aosom-monitor[bot]"
+          git config user.email "aosom-monitor[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "Update Aosom monitor state"
+          git pull --rebase
+          git push
