@@ -1,0 +1,13 @@
+{
+  "category_url": "https://www.aosom.co.uk/category/air-conditioning~705/",
+  "check_interval_minutes": 5,
+  "alert_on_new_in_stock_products": true,
+  "include_keywords": [
+    "air conditioner",
+    "air conditioning unit"
+  ],
+  "exclude_keywords": [
+    "air cooler",
+    "dehumidifier"
+  ]
+}
